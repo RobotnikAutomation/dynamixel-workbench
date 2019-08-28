@@ -51,7 +51,7 @@ typedef struct
 
 class DynamixelController
 {
- private:
+private:
   // ROS NodeHandle
   ros::NodeHandle node_handle_;
   ros::NodeHandle priv_node_handle_;
@@ -72,7 +72,7 @@ class DynamixelController
   // ROS Service Client
 
   // Dynamixel Workbench Parameters
-  DynamixelWorkbench *dxl_wb_;
+  DynamixelWorkbench* dxl_wb_;
 
   std::map<std::string, uint32_t> dynamixel_;
   std::map<std::string, const ControlItem*> control_items_;
@@ -88,8 +88,8 @@ class DynamixelController
   double wheel_separation_;
   double wheel_radius_;
 
-  JointTrajectory *jnt_tra_;
-  trajectory_msgs::JointTrajectory *jnt_tra_msg_;
+  JointTrajectory* jnt_tra_;
+  trajectory_msgs::JointTrajectory* jnt_tra_msg_;
 
   double read_period_;
   double write_period_;
@@ -97,7 +97,7 @@ class DynamixelController
 
   bool is_moving_;
 
- public:
+public:
   DynamixelController();
   ~DynamixelController();
 
@@ -109,9 +109,18 @@ class DynamixelController
   bool initSDKHandlers(void);
   bool getPresentPosition(std::vector<std::string> dxl_name);
 
-  double getReadPeriod(){return read_period_;}
-  double getWritePeriod(){return write_period_;}
-  double getPublishPeriod(){return pub_period_;}
+  double getReadPeriod()
+  {
+    return read_period_;
+  }
+  double getWritePeriod()
+  {
+    return write_period_;
+  }
+  double getPublishPeriod()
+  {
+    return pub_period_;
+  }
 
   void initPublisher(void);
   void initSubscriber(void);
@@ -122,10 +131,10 @@ class DynamixelController
   void writeCallback(const ros::TimerEvent&);
   void publishCallback(const ros::TimerEvent&);
 
-  void commandVelocityCallback(const geometry_msgs::Twist::ConstPtr &msg);
-  void trajectoryMsgCallback(const trajectory_msgs::JointTrajectory::ConstPtr &msg);
-  bool dynamixelCommandMsgCallback(dynamixel_workbench_msgs::DynamixelCommand::Request &req,
-                                   dynamixel_workbench_msgs::DynamixelCommand::Response &res);
+  void commandVelocityCallback(const geometry_msgs::Twist::ConstPtr& msg);
+  void trajectoryMsgCallback(const trajectory_msgs::JointTrajectory::ConstPtr& msg);
+  bool dynamixelCommandMsgCallback(dynamixel_workbench_msgs::DynamixelCommand::Request& req,
+                                   dynamixel_workbench_msgs::DynamixelCommand::Response& res);
 };
 
-#endif //DYNAMIXEL_WORKBENCH_CONTROLLERS_H
+#endif  // DYNAMIXEL_WORKBENCH_CONTROLLERS_H
