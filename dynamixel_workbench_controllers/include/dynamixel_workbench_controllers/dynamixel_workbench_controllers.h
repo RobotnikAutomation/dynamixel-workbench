@@ -27,6 +27,7 @@
 #include <geometry_msgs/Twist.h>
 #include <trajectory_msgs/JointTrajectory.h>
 #include <trajectory_msgs/JointTrajectoryPoint.h>
+#include <robotnik_msgs/inputs_outputs.h>
 
 #include <dynamixel_workbench_toolbox/dynamixel_workbench.h>
 #include <dynamixel_workbench_msgs/DynamixelStateList.h>
@@ -64,6 +65,7 @@ private:
 
   // ROS Topic Subscriber
   ros::Subscriber cmd_vel_sub_;
+  ros::Subscriber io_sub_;
   ros::Subscriber trajectory_sub_;
 
   // ROS Service Server
@@ -85,6 +87,11 @@ private:
   bool is_cmd_vel_topic_;
   bool use_moveit_;
 
+  int stop_negative_input_;
+  int stop_positive_input_;
+  bool endstop_enabled_;
+  std::string endstop_topic_;
+
   double wheel_separation_;
   double wheel_radius_;
 
@@ -94,6 +101,9 @@ private:
   double read_period_;
   double write_period_;
   double pub_period_;
+
+  bool stop_negative_;
+  bool stop_positive_;
 
   bool is_moving_;
 
@@ -132,6 +142,7 @@ public:
   void publishCallback(const ros::TimerEvent&);
 
   void commandVelocityCallback(const geometry_msgs::Twist::ConstPtr& msg);
+  void ioCallback(const robotnik_msgs::inputs_outputs::ConstPtr& msg);
   void trajectoryMsgCallback(const trajectory_msgs::JointTrajectory::ConstPtr& msg);
   bool dynamixelCommandMsgCallback(dynamixel_workbench_msgs::DynamixelCommand::Request& req,
                                    dynamixel_workbench_msgs::DynamixelCommand::Response& res);

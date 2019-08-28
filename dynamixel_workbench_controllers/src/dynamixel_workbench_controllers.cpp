@@ -32,6 +32,11 @@ DynamixelController::DynamixelController()
   is_cmd_vel_topic_ = priv_node_handle_.param<bool>("use_cmd_vel_topic", false);
   use_moveit_ = priv_node_handle_.param<bool>("use_moveit", false);
 
+  stop_negative_input_ = priv_node_handle_.param<int>("stop_negative_input", 0);
+  stop_positive_input_ = priv_node_handle_.param<int>("stop_positive_input", 1);
+  endstop_enabled_ = priv_node_handle_.param<bool>("endstop_enabled", false);
+  endstop_topic_ = priv_node_handle_.param<std::string>("endstop_topic", "rly816/status");
+
   read_period_ = priv_node_handle_.param<double>("dxl_read_period", 0.010f);
   write_period_ = priv_node_handle_.param<double>("dxl_write_period", 0.010f);
   pub_period_ = priv_node_handle_.param<double>("publish_period", 0.010f);
@@ -333,6 +338,8 @@ void DynamixelController::initSubscriber()
       priv_node_handle_.subscribe("joint_trajectory", 100, &DynamixelController::trajectoryMsgCallback, this);
   if (is_cmd_vel_topic_)
     cmd_vel_sub_ = priv_node_handle_.subscribe("cmd_vel", 10, &DynamixelController::commandVelocityCallback, this);
+  if (endstop_enabled_)
+    io_sub_ = node_handle_.subscribe(endstop_topic_, 10, &DynamixelController::ioCallback, this);
 }
 
 void DynamixelController::initServer()
@@ -584,6 +591,16 @@ void DynamixelController::commandVelocityCallback(const geometry_msgs::Twist::Co
   {
     ROS_ERROR("%s", log);
   }
+}
+
+void DynamixelController::ioCallback(const robotnik_msgs::inputs_outputs::ConstPtr& msg)
+{
+  stop_negative_ = 1 - msg->digital_inputs[stop_negative_input_];
+
+  stop_positive_ = 1 - msg->digital_inputs[stop_positive_input_];
+
+  ROS_ERROR("%i", stop_negative_);
+  ROS_ERROR("%i", stop_positive_);
 }
 
 void DynamixelController::writeCallback(const ros::TimerEvent&)
