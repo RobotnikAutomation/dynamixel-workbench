@@ -65,7 +65,7 @@ private:
 
   // ROS Topic Subscriber
   ros::Subscriber cmd_vel_sub_;
-  ros::Subscriber io_sub_;
+  ros::Subscriber endstop_sub_;
   ros::Subscriber trajectory_sub_;
 
   // ROS Service Server
@@ -77,6 +77,9 @@ private:
   DynamixelWorkbench* dxl_wb_;
 
   std::map<std::string, uint32_t> dynamixel_;
+
+  std::map<std::string, std::tuple<float, float, float, bool, float>> dynamixel_robotnik_params_;
+
   std::map<std::string, const ControlItem*> control_items_;
   std::vector<std::pair<std::string, ItemValue>> dynamixel_info_;
   dynamixel_workbench_msgs::DynamixelStateList dynamixel_state_list_;
@@ -87,10 +90,10 @@ private:
   bool is_cmd_vel_topic_;
   bool use_moveit_;
 
-  int stop_negative_input_;
-  int stop_positive_input_;
-  bool endstop_enabled_;
   std::string endstop_topic_;
+  ros::Time last_endstop_time_;
+  int num_negative_input_;
+  int num_positive_input_;
 
   double wheel_separation_;
   double wheel_radius_;
@@ -102,10 +105,11 @@ private:
   double write_period_;
   double pub_period_;
 
-  bool stop_negative_;
-  bool stop_positive_;
-
   bool is_moving_;
+
+  bool set_min_;
+  bool set_max_;
+  double rad_error_;
 
 public:
   DynamixelController();
@@ -142,7 +146,7 @@ public:
   void publishCallback(const ros::TimerEvent&);
 
   void commandVelocityCallback(const geometry_msgs::Twist::ConstPtr& msg);
-  void ioCallback(const robotnik_msgs::inputs_outputs::ConstPtr& msg);
+  void endstopCallback(const robotnik_msgs::inputs_outputs::ConstPtr& msg);
   void trajectoryMsgCallback(const trajectory_msgs::JointTrajectory::ConstPtr& msg);
   bool dynamixelCommandMsgCallback(dynamixel_workbench_msgs::DynamixelCommand::Request& req,
                                    dynamixel_workbench_msgs::DynamixelCommand::Response& res);

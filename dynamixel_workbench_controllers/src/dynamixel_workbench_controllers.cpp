@@ -1,18 +1,18 @@
 /*******************************************************************************
-* Copyright 2018 ROBOTIS CO., LTD.
-*
-* Licensed under the Apache License, Version 2.0 (the "License");
-* you may not use this file except in compliance with the License.
-* You may obtain a copy of the License at
-*
-*     http://www.apache.org/licenses/LICENSE-2.0
-*
-* Unless required by applicable law or agreed to in writing, software
-* distributed under the License is distributed on an "AS IS" BASIS,
-* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-* See the License for the specific language governing permissions and
-* limitations under the License.
-*******************************************************************************/
+ * Copyright 2018 ROBOTIS CO., LTD.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *******************************************************************************/
 
 /* Authors: Taehun Lim (Darby) */
 
@@ -32,10 +32,9 @@ DynamixelController::DynamixelController()
   is_cmd_vel_topic_ = priv_node_handle_.param<bool>("use_cmd_vel_topic", false);
   use_moveit_ = priv_node_handle_.param<bool>("use_moveit", false);
 
-  stop_negative_input_ = priv_node_handle_.param<int>("stop_negative_input", 0);
-  stop_positive_input_ = priv_node_handle_.param<int>("stop_positive_input", 1);
-  endstop_enabled_ = priv_node_handle_.param<bool>("endstop_enabled", false);
-  endstop_topic_ = priv_node_handle_.param<std::string>("endstop_topic", "rly816/status");
+  endstop_topic_ = priv_node_handle_.param<std::string>("endstop_topic", "");
+  num_negative_input_ = priv_node_handle_.param<int>("num_negative_input", 0);
+  num_positive_input_ = priv_node_handle_.param<int>("num_positive_input", 1);
 
   read_period_ = priv_node_handle_.param<double>("dxl_read_period", 0.010f);
   write_period_ = priv_node_handle_.param<double>("dxl_write_period", 0.010f);
@@ -87,19 +86,43 @@ bool DynamixelController::getDynamixelsInfo(const std::string yaml_file)
     }
 
     YAML::Node item = dynamixel[name];
+
+    float max_rad = 9999;
+    float min_rad = -9999;
+    float joint_proportion = 1;
+    bool endstop_detection = false;
+    float rad_error = 0;
+
     for (YAML::const_iterator it_item = item.begin(); it_item != item.end(); it_item++)
     {
       std::string item_name = it_item->first.as<std::string>();
-      int32_t value = it_item->second.as<int32_t>();
 
-      if (item_name == "ID")
-        dynamixel_[name] = value;
+      // TODO Comprobar que se guardan correctamente
+      if (item_name == "Max_Rad")
+        max_rad = it_item->second.as<float>();
+      else if (item_name == "Min_Rad")
+        min_rad = it_item->second.as<float>();
+      else if (item_name == "Joint_Proportion")
+        joint_proportion = it_item->second.as<float>();
+      else if (item_name == "Endstop_Detection")
+        endstop_detection = it_item->second.as<bool>();
+      else if (item_name == "Rad_Error")
+        rad_error = it_item->second.as<float>();
+      else
+      {
+        int32_t value = it_item->second.as<int32_t>();
 
-      ItemValue item_value = { item_name, value };
-      std::pair<std::string, ItemValue> info(name, item_value);
+        if (item_name == "ID")
+          dynamixel_[name] = value;
 
-      dynamixel_info_.push_back(info);
+        ItemValue item_value = { item_name, value };
+        std::pair<std::string, ItemValue> info(name, item_value);
+
+        dynamixel_info_.push_back(info);
+      }
     }
+    std::tuple<float, float, float, bool, float> info(max_rad, min_rad, joint_proportion, endstop_detection, rad_error);
+    dynamixel_robotnik_params_[name] = info;
   }
 
   return true;
@@ -298,7 +321,23 @@ bool DynamixelController::getPresentPosition(std::vector<std::string> dxl_name)
     {
       for (uint8_t index = 0; index < id_cnt; index++)
       {
-        wp.position = dxl_wb_->convertValue2Radian(id_array[index], get_position[index]);
+        // TODO Comprobar que se convierte con joint_proportion
+        std::string dxl_first = "";
+        for (auto& i : dynamixel_)
+        {
+          if (i.second == id_array[index])
+          {
+            dxl_first = i.first;
+            break;
+          }
+        }
+        float joint_proportion = std::get<2>(dynamixel_robotnik_params_[dxl_first]);
+        float rad_error = std::get<4>(dynamixel_robotnik_params_[dxl_first]);
+
+        wp.position = joint_proportion * (dxl_wb_->convertValue2Radian(id_array[index],
+                                                                       get_position[index]) +
+                                          rad_error);  // Velocity multiplied with joint proportion
+
         pre_goal_.push_back(wp);
       }
     }
@@ -316,7 +355,12 @@ bool DynamixelController::getPresentPosition(std::vector<std::string> dxl_name)
         ROS_ERROR("%s", log);
       }
 
-      wp.position = dxl_wb_->convertValue2Radian((uint8_t)dxl.second, read_position);
+      // TODO Comprobar que se convierte con joint_proportion
+      float joint_proportion = std::get<2>(dynamixel_robotnik_params_[dxl.first]);
+      float rad_error = std::get<4>(dynamixel_robotnik_params_[dxl.first]);
+
+      wp.position = joint_proportion * (dxl_wb_->convertValue2Radian((uint8_t)dxl.second, read_position) +
+                                        rad_error);  // Velocity multiplied with joint proportion
       pre_goal_.push_back(wp);
     }
   }
@@ -334,12 +378,14 @@ void DynamixelController::initPublisher()
 
 void DynamixelController::initSubscriber()
 {
+  last_endstop_time_ = ros::Time::now();
+
   trajectory_sub_ =
       priv_node_handle_.subscribe("joint_trajectory", 100, &DynamixelController::trajectoryMsgCallback, this);
   if (is_cmd_vel_topic_)
     cmd_vel_sub_ = priv_node_handle_.subscribe("cmd_vel", 10, &DynamixelController::commandVelocityCallback, this);
-  if (endstop_enabled_)
-    io_sub_ = node_handle_.subscribe(endstop_topic_, 10, &DynamixelController::ioCallback, this);
+  if (endstop_topic_ != "")
+    endstop_sub_ = node_handle_.subscribe(endstop_topic_, 10, &DynamixelController::endstopCallback, this);
 }
 
 void DynamixelController::initServer()
@@ -460,6 +506,32 @@ void DynamixelController::publishCallback(const ros::TimerEvent&)
 #endif
   dynamixel_state_list_pub_.publish(dynamixel_state_list_);
 
+  // TODO probar que si no recibe endstop, para el motor correspondiente.
+  ros::Time current_time = ros::Time::now();
+  double diff = (current_time - last_endstop_time_).toSec();
+  if (diff > 0.0025)
+  {
+    ROS_ERROR("%f", diff);
+    for (auto const& dxl : dynamixel_)
+    {
+      // TODO Condición que comprueba que Endstop_Detection es true
+      if (std::get<3>(dynamixel_robotnik_params_[dxl.first]))
+      {
+        dxl_wb_->torqueOff((uint8_t)dxl.second);
+        ROS_WARN("Endstop topic not received: Stopped motor with ID %i.", dxl.second);
+      }
+    }
+  }
+  else
+  {
+    for (auto const& dxl : dynamixel_)
+    {
+      // TODO Condición que comprueba que Endstop_Detection es true
+      if (std::get<3>(dynamixel_robotnik_params_[dxl.first]))
+        dxl_wb_->torqueOn((uint8_t)dxl.second);
+    }
+  }
+
   if (is_joint_state_topic_)
   {
     joint_state_msg_.header.stamp = ros::Time::now();
@@ -487,12 +559,26 @@ void DynamixelController::publishCallback(const ros::TimerEvent&)
               dxl_wb_->convertValue2Current((int16_t)dynamixel_state_list_.dynamixel_state[id_cnt].present_current);
       }
       else if (dxl_wb_->getProtocolVersion() == 1.0f)
+      {
         effort = dxl_wb_->convertValue2Load((int16_t)dynamixel_state_list_.dynamixel_state[id_cnt].present_current);
+      }
 
-      velocity = dxl_wb_->convertValue2Velocity(
-          (uint8_t)dxl.second, (int32_t)dynamixel_state_list_.dynamixel_state[id_cnt].present_velocity);
-      position = dxl_wb_->convertValue2Radian((uint8_t)dxl.second,
-                                              (int32_t)dynamixel_state_list_.dynamixel_state[id_cnt].present_position);
+      // TODO Probar que la salida se multiplica correctamente por joint_proportion
+
+      float rad_error = std::get<4>(dynamixel_robotnik_params_[dxl.first]);
+      float joint_proportion = std::get<2>(dynamixel_robotnik_params_[dxl.first]);
+
+      velocity =
+          joint_proportion *
+          (dxl_wb_->convertValue2Velocity((uint8_t)dxl.second,
+                                          (int32_t)dynamixel_state_list_.dynamixel_state[id_cnt].present_velocity) +
+           rad_error);  // Multiplied with joint proportion
+
+      position =
+          joint_proportion *
+          (dxl_wb_->convertValue2Radian((uint8_t)dxl.second,
+                                        (int32_t)dynamixel_state_list_.dynamixel_state[id_cnt].present_position) +
+           rad_error);  // Multiplied with joint proportion
 
       joint_state_msg_.effort.push_back(effort);
       joint_state_msg_.velocity.push_back(velocity);
@@ -593,14 +679,14 @@ void DynamixelController::commandVelocityCallback(const geometry_msgs::Twist::Co
   }
 }
 
-void DynamixelController::ioCallback(const robotnik_msgs::inputs_outputs::ConstPtr& msg)
+void DynamixelController::endstopCallback(const robotnik_msgs::inputs_outputs::ConstPtr& msg)
 {
-  stop_negative_ = 1 - msg->digital_inputs[stop_negative_input_];
+  last_endstop_time_ = ros::Time::now();
 
-  stop_positive_ = 1 - msg->digital_inputs[stop_positive_input_];
+  // TODO Poner posición radianes actual a max o min
+  set_min_ = 1 - msg->digital_inputs[num_negative_input_];
 
-  ROS_ERROR("%i", stop_negative_);
-  ROS_ERROR("%i", stop_positive_);
+  set_max_ = 1 - msg->digital_inputs[num_positive_input_];
 }
 
 void DynamixelController::writeCallback(const ros::TimerEvent&)
@@ -627,9 +713,26 @@ void DynamixelController::writeCallback(const ros::TimerEvent&)
 
   if (is_moving_ == true)
   {
+    // TODO Probar que la entrada se divide correctamente por joint_proportion
     for (uint8_t index = 0; index < id_cnt; index++)
+    {
+      std::string dxl_first = "";
+      for (auto& i : dynamixel_)
+      {
+        if (i.second == id_array[index])
+        {
+          dxl_first = i.first;
+          break;
+        }
+      }
+      float joint_proportion = std::get<2>(dynamixel_robotnik_params_[dxl_first]);
+      float rad_error = std::get<4>(dynamixel_robotnik_params_[dxl_first]);
+
       dynamixel_position[index] =
-          dxl_wb_->convertRadian2Value(id_array[index], jnt_tra_msg_->points[point_cnt].positions.at(index));
+          dxl_wb_->convertRadian2Value(id_array[index],
+                                       jnt_tra_msg_->points[point_cnt].positions.at(index) / joint_proportion -
+                                           rad_error);  // Velocity multiplied with joint proportion
+    }
 
     result = dxl_wb_->syncWrite(SYNC_WRITE_HANDLER_FOR_GOAL_POSITION, id_array, id_cnt, dynamixel_position, 1, &log);
     if (result == false)
@@ -661,6 +764,7 @@ void DynamixelController::writeCallback(const ros::TimerEvent&)
 
 void DynamixelController::trajectoryMsgCallback(const trajectory_msgs::JointTrajectory::ConstPtr& msg)
 {
+  // TODO Aquí tiene que haber una restricción para que nunca se pase del max_rad ni min_rad.
   uint8_t id_cnt = 0;
   bool result = false;
   WayPoint wp;
