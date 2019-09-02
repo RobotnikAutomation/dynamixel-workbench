@@ -33,12 +33,13 @@ DynamixelController::DynamixelController()
   use_moveit_ = priv_node_handle_.param<bool>("use_moveit", false);
 
   endstop_topic_ = priv_node_handle_.param<std::string>("endstop_topic", "");
-  num_negative_input_ = priv_node_handle_.param<int>("num_negative_input", 0);
-  num_positive_input_ = priv_node_handle_.param<int>("num_positive_input", 1);
+  num_upper_input_ = priv_node_handle_.param<int>("num_upper_input", 0);
+  num_lower_input_ = priv_node_handle_.param<int>("num_lower_input", 1);
 
   read_period_ = priv_node_handle_.param<double>("dxl_read_period", 0.010f);
   write_period_ = priv_node_handle_.param<double>("dxl_write_period", 0.010f);
   pub_period_ = priv_node_handle_.param<double>("publish_period", 0.010f);
+  pub_period_ = priv_node_handle_.param<double>("endstop_period", 0.010f);
 
   if (is_cmd_vel_topic_ == true)
   {
@@ -87,8 +88,8 @@ bool DynamixelController::getDynamixelsInfo(const std::string yaml_file)
 
     YAML::Node item = dynamixel[name];
 
-    float max_rad = 9999;
-    float min_rad = -9999;
+    float max_lim = 9999999;
+    float min_lim = -9999999;
     float joint_proportion = 1;
     bool endstop_detection = false;
     float rad_error = 0;
@@ -97,16 +98,15 @@ bool DynamixelController::getDynamixelsInfo(const std::string yaml_file)
     {
       std::string item_name = it_item->first.as<std::string>();
 
-      // TODO Comprobar que se guardan correctamente
-      if (item_name == "Max_Rad")
-        max_rad = it_item->second.as<float>();
-      else if (item_name == "Min_Rad")
-        min_rad = it_item->second.as<float>();
+      if (item_name == "Max_Lim")
+        max_lim = it_item->second.as<float>();
+      else if (item_name == "Min_Lim")
+        min_lim = it_item->second.as<float>();
       else if (item_name == "Joint_Proportion")
         joint_proportion = it_item->second.as<float>();
       else if (item_name == "Endstop_Detection")
         endstop_detection = it_item->second.as<bool>();
-      else if (item_name == "Rad_Error")
+      else if (item_name == "Initial_Value")
         rad_error = it_item->second.as<float>();
       else
       {
@@ -121,7 +121,7 @@ bool DynamixelController::getDynamixelsInfo(const std::string yaml_file)
         dynamixel_info_.push_back(info);
       }
     }
-    std::tuple<float, float, float, bool, float> info(max_rad, min_rad, joint_proportion, endstop_detection, rad_error);
+    std::tuple<float, float, float, bool, float> info(max_lim, min_lim, joint_proportion, endstop_detection, rad_error);
     dynamixel_robotnik_params_[name] = info;
   }
 
@@ -321,7 +321,6 @@ bool DynamixelController::getPresentPosition(std::vector<std::string> dxl_name)
     {
       for (uint8_t index = 0; index < id_cnt; index++)
       {
-        // TODO Comprobar que se convierte con joint_proportion
         std::string dxl_first = "";
         for (auto& i : dynamixel_)
         {
@@ -334,9 +333,9 @@ bool DynamixelController::getPresentPosition(std::vector<std::string> dxl_name)
         float joint_proportion = std::get<2>(dynamixel_robotnik_params_[dxl_first]);
         float rad_error = std::get<4>(dynamixel_robotnik_params_[dxl_first]);
 
-        wp.position = joint_proportion * (dxl_wb_->convertValue2Radian(id_array[index],
-                                                                       get_position[index]) +
-                                          rad_error);  // Velocity multiplied with joint proportion
+        wp.position = (joint_proportion * dxl_wb_->convertValue2Radian(id_array[index],
+                                                                       get_position[index])) +
+                      rad_error;  // Convert to user position
 
         pre_goal_.push_back(wp);
       }
@@ -355,12 +354,11 @@ bool DynamixelController::getPresentPosition(std::vector<std::string> dxl_name)
         ROS_ERROR("%s", log);
       }
 
-      // TODO Comprobar que se convierte con joint_proportion
       float joint_proportion = std::get<2>(dynamixel_robotnik_params_[dxl.first]);
       float rad_error = std::get<4>(dynamixel_robotnik_params_[dxl.first]);
 
-      wp.position = joint_proportion * (dxl_wb_->convertValue2Radian((uint8_t)dxl.second, read_position) +
-                                        rad_error);  // Velocity multiplied with joint proportion
+      wp.position = (joint_proportion * dxl_wb_->convertValue2Radian((uint8_t)dxl.second, read_position)) +
+                    rad_error;  // Convert to user position
       pre_goal_.push_back(wp);
     }
   }
@@ -506,18 +504,16 @@ void DynamixelController::publishCallback(const ros::TimerEvent&)
 #endif
   dynamixel_state_list_pub_.publish(dynamixel_state_list_);
 
-  // TODO probar que si no recibe endstop, para el motor correspondiente.
   ros::Time current_time = ros::Time::now();
   double diff = (current_time - last_endstop_time_).toSec();
-  if (diff > 0.0025)
+  if (diff > 0.1)
   {
-    ROS_ERROR("%f", diff);
     for (auto const& dxl : dynamixel_)
     {
-      // TODO Condición que comprueba que Endstop_Detection es true
       if (std::get<3>(dynamixel_robotnik_params_[dxl.first]))
       {
         dxl_wb_->torqueOff((uint8_t)dxl.second);
+        set_max_ = set_min_ = 0;
         ROS_WARN("Endstop topic not received: Stopped motor with ID %i.", dxl.second);
       }
     }
@@ -526,7 +522,6 @@ void DynamixelController::publishCallback(const ros::TimerEvent&)
   {
     for (auto const& dxl : dynamixel_)
     {
-      // TODO Condición que comprueba que Endstop_Detection es true
       if (std::get<3>(dynamixel_robotnik_params_[dxl.first]))
         dxl_wb_->torqueOn((uint8_t)dxl.second);
     }
@@ -563,22 +558,19 @@ void DynamixelController::publishCallback(const ros::TimerEvent&)
         effort = dxl_wb_->convertValue2Load((int16_t)dynamixel_state_list_.dynamixel_state[id_cnt].present_current);
       }
 
-      // TODO Probar que la salida se multiplica correctamente por joint_proportion
-
       float rad_error = std::get<4>(dynamixel_robotnik_params_[dxl.first]);
       float joint_proportion = std::get<2>(dynamixel_robotnik_params_[dxl.first]);
 
-      velocity =
-          joint_proportion *
-          (dxl_wb_->convertValue2Velocity((uint8_t)dxl.second,
-                                          (int32_t)dynamixel_state_list_.dynamixel_state[id_cnt].present_velocity) +
-           rad_error);  // Multiplied with joint proportion
+      velocity = joint_proportion *
+                 (dxl_wb_->convertValue2Velocity(
+                     (uint8_t)dxl.second,
+                     (int32_t)dynamixel_state_list_.dynamixel_state[id_cnt].present_velocity));  // Multiplied with
+                                                                                                 // joint proportion
 
-      position =
-          joint_proportion *
-          (dxl_wb_->convertValue2Radian((uint8_t)dxl.second,
-                                        (int32_t)dynamixel_state_list_.dynamixel_state[id_cnt].present_position) +
-           rad_error);  // Multiplied with joint proportion
+      position = (joint_proportion * dxl_wb_->convertValue2Radian(
+                                         (uint8_t)dxl.second,
+                                         (int32_t)dynamixel_state_list_.dynamixel_state[id_cnt].present_position)) +
+                 rad_error;  // Convert to user position
 
       joint_state_msg_.effort.push_back(effort);
       joint_state_msg_.velocity.push_back(velocity);
@@ -683,10 +675,89 @@ void DynamixelController::endstopCallback(const robotnik_msgs::inputs_outputs::C
 {
   last_endstop_time_ = ros::Time::now();
 
-  // TODO Poner posición radianes actual a max o min
-  set_min_ = 1 - msg->digital_inputs[num_negative_input_];
+  set_max_ = 1 - msg->digital_inputs[num_upper_input_];
+  set_min_ = 1 - msg->digital_inputs[num_lower_input_];
 
-  set_max_ = 1 - msg->digital_inputs[num_positive_input_];
+  bool result = false;
+  const char* log = NULL;
+
+  uint8_t id_array[dynamixel_.size()];
+  uint8_t id_cnt = 0;
+
+  int32_t dynamixel_position[dynamixel_.size()];
+
+  for (auto const& dxl : dynamixel_)
+  {
+    float max_lim = std::get<0>(dynamixel_robotnik_params_[dxl.first]);
+    float min_lim = std::get<1>(dynamixel_robotnik_params_[dxl.first]);
+    float joint_proportion = std::get<2>(dynamixel_robotnik_params_[dxl.first]);
+    float rad_error = std::get<4>(dynamixel_robotnik_params_[dxl.first]);
+    float endstop_detection = std::get<3>(dynamixel_robotnik_params_[dxl.first]);
+    float pos_actual;
+
+    for (auto& i : dynamixel_state_list_.dynamixel_state)
+    {
+      if (i.id == dxl.second)
+      {
+        pos_actual = dxl_wb_->convertValue2Radian((uint8_t)dxl.second, (int32_t)i.present_position);
+        break;
+      }
+    }
+    pos_actual = pos_actual * joint_proportion;
+    ROS_ERROR("position: %f", pos_actual);
+
+    if (endstop_detection)
+    {
+      if (set_max_ && set_min_)  // Both endstops cannot be pressed
+      {
+#ifdef DEBUG
+        ROS_WARN("Both endstops are pressed. Stopped motor %i for safety.", id_array[index]);
+#endif
+        dxl_wb_->torqueOff(dxl.second);
+      }
+      else if (set_max_)  // Upper endstop pressed
+      {
+#ifdef DEBUG
+        ROS_WARN("Upper endstop is pressed. Setting max position to motor %i.", id_array[index]);
+#endif
+        rad_error = max_lim - pos_actual;
+        std::get<4>(dynamixel_robotnik_params_[dxl.first]) = rad_error;
+
+        dxl_wb_->torqueOn(dxl.second);
+      }
+      else if (set_min_)  // Lower endstop pressed
+      {
+#ifdef DEBUG
+        ROS_WARN("Lower endstop is pressed. Setting min position to motor %i.", id_array[index]);
+#endif
+        rad_error = min_lim - pos_actual;
+        std::get<4>(dynamixel_robotnik_params_[dxl.first]) = rad_error;
+
+        dxl_wb_->torqueOn(dxl.second);
+      }
+      else  // No endstop pressed
+      {
+        dxl_wb_->torqueOn(dxl.second);
+      }
+    }
+    else  // If no endstop_detection enabled
+    {
+    }
+
+    // Common limitation
+    float rad = (pos_actual - rad_error) / joint_proportion;  // Convert to dynamixel position
+    dynamixel_position[id_cnt] = dxl_wb_->convertRadian2Value(id_array[id_cnt], rad);
+
+    id_cnt++;
+  }
+  // TODO TODO TODO Esto no parece funcionar correctamente, hay que hacer que el motor se detenga en la posición max en
+  // caso de tocar upper, o min si lower
+  result = dxl_wb_->syncWrite(SYNC_WRITE_HANDLER_FOR_GOAL_POSITION, id_array, id_cnt, dynamixel_position, 1, &log);
+
+  if (result == false)
+  {
+    ROS_ERROR("%s", log);
+  }
 }
 
 void DynamixelController::writeCallback(const ros::TimerEvent&)
@@ -713,25 +784,42 @@ void DynamixelController::writeCallback(const ros::TimerEvent&)
 
   if (is_moving_ == true)
   {
-    // TODO Probar que la entrada se divide correctamente por joint_proportion
     for (uint8_t index = 0; index < id_cnt; index++)
     {
       std::string dxl_first = "";
+      int dxl_second;
       for (auto& i : dynamixel_)
       {
         if (i.second == id_array[index])
         {
           dxl_first = i.first;
+          dxl_second = i.second;
           break;
         }
       }
+      float max_lim = std::get<0>(dynamixel_robotnik_params_[dxl_first]);
+      float min_lim = std::get<1>(dynamixel_robotnik_params_[dxl_first]);
       float joint_proportion = std::get<2>(dynamixel_robotnik_params_[dxl_first]);
       float rad_error = std::get<4>(dynamixel_robotnik_params_[dxl_first]);
+      float endstop_detection = std::get<3>(dynamixel_robotnik_params_[dxl_first]);
+      float pos_actual;
 
-      dynamixel_position[index] =
-          dxl_wb_->convertRadian2Value(id_array[index],
-                                       jnt_tra_msg_->points[point_cnt].positions.at(index) / joint_proportion -
-                                           rad_error);  // Velocity multiplied with joint proportion
+      // Common limitation
+      float rad = jnt_tra_msg_->points[point_cnt].positions.at(index);
+
+      if (rad > max_lim)
+      {
+        rad = max_lim;
+      }
+      else if (rad < min_lim)
+      {
+        rad = min_lim;
+      }
+
+      // ROS_WARN("rad: %f", rad);
+      rad = (rad - rad_error) / joint_proportion;  // Convert to dynamixel position
+      // ROS_WARN("rad: %f", rad * joint_proportion);
+      dynamixel_position[index] = dxl_wb_->convertRadian2Value(id_array[index], rad);
     }
 
     result = dxl_wb_->syncWrite(SYNC_WRITE_HANDLER_FOR_GOAL_POSITION, id_array, id_cnt, dynamixel_position, 1, &log);
@@ -764,7 +852,6 @@ void DynamixelController::writeCallback(const ros::TimerEvent&)
 
 void DynamixelController::trajectoryMsgCallback(const trajectory_msgs::JointTrajectory::ConstPtr& msg)
 {
-  // TODO Aquí tiene que haber una restricción para que nunca se pase del max_rad ni min_rad.
   uint8_t id_cnt = 0;
   bool result = false;
   WayPoint wp;
