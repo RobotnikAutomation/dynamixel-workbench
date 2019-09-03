@@ -224,6 +224,18 @@ bool DynamixelController::initControlItems(void)
   control_items_["Present_Velocity"] = present_velocity;
   control_items_["Present_Current"] = present_current;
 
+  for (auto const& dxl : dynamixel_)
+  {
+    for (auto& i : dynamixel_state_list_.dynamixel_state)
+    {
+      if (i.id == dxl.second)
+      {
+        dynamixel_goal_[dxl.first] = dxl_wb_->convertValue2Radian((uint8_t)dxl.second, (int32_t)i.present_position);
+        break;
+      }
+    }
+  }
+
   return true;
 }
 
@@ -692,19 +704,22 @@ void DynamixelController::endstopCallback(const robotnik_msgs::inputs_outputs::C
     float min_lim = std::get<1>(dynamixel_robotnik_params_[dxl.first]);
     float joint_proportion = std::get<2>(dynamixel_robotnik_params_[dxl.first]);
     float rad_error = std::get<4>(dynamixel_robotnik_params_[dxl.first]);
+    float previous_rad_error = rad_error;
     float endstop_detection = std::get<3>(dynamixel_robotnik_params_[dxl.first]);
     float pos_actual;
+
+    id_array[id_cnt] = (uint8_t)dxl.second;
 
     for (auto& i : dynamixel_state_list_.dynamixel_state)
     {
       if (i.id == dxl.second)
       {
+        dynamixel_position[id_cnt] = (int32_t)i.present_position;
         pos_actual = dxl_wb_->convertValue2Radian((uint8_t)dxl.second, (int32_t)i.present_position);
         break;
       }
     }
     pos_actual = pos_actual * joint_proportion;
-    ROS_ERROR("position: %f", pos_actual);
 
     if (endstop_detection)
     {
@@ -744,19 +759,28 @@ void DynamixelController::endstopCallback(const robotnik_msgs::inputs_outputs::C
     {
     }
 
-    // Common limitation
-    float rad = (pos_actual - rad_error) / joint_proportion;  // Convert to dynamixel position
-    dynamixel_position[id_cnt] = dxl_wb_->convertRadian2Value(id_array[id_cnt], rad);
+    if (endstop_detection && rad_error != previous_rad_error)
+    {
+      float rad = pos_actual / joint_proportion;  // Convert to dynamixel position
+
+      // Limit movement depending on pressed endstop
+      if ((set_max_ && pos_actual < dynamixel_goal_[dxl.first]) ||
+          (set_min_ && pos_actual > dynamixel_goal_[dxl.first]))
+      {
+        result = dxl_wb_->goalPosition(id_array[id_cnt], rad, &log);
+
+        if (result)
+        {
+          dynamixel_goal_[dxl.first] = pos_actual;
+        }
+        else
+        {
+          ROS_ERROR("%s", log);
+        }
+      }
+    }
 
     id_cnt++;
-  }
-  // TODO TODO TODO Esto no parece funcionar correctamente, hay que hacer que el motor se detenga en la posición max en
-  // caso de tocar upper, o min si lower
-  result = dxl_wb_->syncWrite(SYNC_WRITE_HANDLER_FOR_GOAL_POSITION, id_array, id_cnt, dynamixel_position, 1, &log);
-
-  if (result == false)
-  {
-    ROS_ERROR("%s", log);
   }
 }
 
@@ -816,9 +840,9 @@ void DynamixelController::writeCallback(const ros::TimerEvent&)
         rad = min_lim;
       }
 
-      // ROS_WARN("rad: %f", rad);
+      dynamixel_goal_[dxl_first] = rad - rad_error;
+
       rad = (rad - rad_error) / joint_proportion;  // Convert to dynamixel position
-      // ROS_WARN("rad: %f", rad * joint_proportion);
       dynamixel_position[index] = dxl_wb_->convertRadian2Value(id_array[index], rad);
     }
 

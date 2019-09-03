@@ -79,6 +79,7 @@ private:
   std::map<std::string, uint32_t> dynamixel_;
 
   std::map<std::string, std::tuple<float, float, float, bool, float>> dynamixel_robotnik_params_;
+  std::map<std::string, float> dynamixel_goal_;
 
   std::map<std::string, const ControlItem*> control_items_;
   std::vector<std::pair<std::string, ItemValue>> dynamixel_info_;

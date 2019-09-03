@@ -1,0 +1,42 @@
+# You can find control table of Dynamixel on emanual (http://emanual.robotis.com/#control-table)
+# Control table item has to be set Camel_Case and not included whitespace
+# You are supposed to set at least Dynamixel ID
+
+# Torso
+torso_slider_joint:
+  ID: 1
+  Return_Delay_Time: 0
+  Operating_Mode: 4
+  Profile_Acceleration: 500
+  Profile_Velocity: 500
+
+  # Upper limit
+  Max_Lim: 0.3645
+  # Lower limit
+  Min_Lim: 0
+  # Proportion: jp * radians = meters
+  Joint_Proportion: -0.027407407
+  # If use the endstop topic
+  Endstop_Detection: true
+  # Initial value. If we set a value as torso up, the first step is lower the torso until detects the lower endstop
+  Initial_Value: 0.3645
+
+# Head pan
+head_pan_joint:
+  ID: 2
+  Return_Delay_Time: 0
+  Profile_Acceleration: 500
+  Profile_Velocity: 500
+  
+  Max_Lim: 1.6
+  Min_Lim: -1.6
+
+# Head tilt
+head_tilt_joint:
+  ID: 3
+  Return_Delay_Time: 0
+  Profile_Acceleration: 500
+  Profile_Velocity: 500
+
+  Max_Lim: 1.6
+  Min_Lim: -1.6
