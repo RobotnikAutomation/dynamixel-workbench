@@ -28,6 +28,7 @@
 #include <trajectory_msgs/JointTrajectory.h>
 #include <trajectory_msgs/JointTrajectoryPoint.h>
 #include <robotnik_msgs/inputs_outputs.h>
+#include <std_msgs/Bool.h>
 
 #include <dynamixel_workbench_toolbox/dynamixel_workbench.h>
 #include <dynamixel_workbench_msgs/DynamixelStateList.h>
@@ -60,13 +61,17 @@ private:
   // ROS Parameters
 
   // ROS Topic Publisher
+  ros::Publisher trajectory_pub_;
   ros::Publisher dynamixel_state_list_pub_;
   ros::Publisher joint_states_pub_;
 
   // ROS Topic Subscriber
   ros::Subscriber cmd_vel_sub_;
   ros::Subscriber endstop_sub_;
+  ros::Subscriber emergency_stop_sub_;
   ros::Subscriber trajectory_sub_;
+
+  bool first_start_;
 
   // ROS Service Server
   ros::ServiceServer dynamixel_command_server_;
@@ -92,6 +97,7 @@ private:
   bool use_moveit_;
 
   std::string endstop_topic_;
+  std::string emergency_stop_topic_;
   ros::Time last_endstop_time_;
   int num_upper_input_;
   int num_lower_input_;
@@ -116,8 +122,10 @@ public:
   DynamixelController();
   ~DynamixelController();
 
+  std::string yaml_file_;
+
   bool initWorkbench(const std::string port_name, const uint32_t baud_rate);
-  bool getDynamixelsInfo(const std::string yaml_file);
+  bool getDynamixelsInfo(void);
   bool loadDynamixels(void);
   bool initDynamixels(void);
   bool initControlItems(void);
@@ -148,6 +156,7 @@ public:
 
   void commandVelocityCallback(const geometry_msgs::Twist::ConstPtr& msg);
   void endstopCallback(const robotnik_msgs::inputs_outputs::ConstPtr& msg);
+  void emergencyStopCallback(const std_msgs::Bool::ConstPtr& msg);
   void trajectoryMsgCallback(const trajectory_msgs::JointTrajectory::ConstPtr& msg);
   bool dynamixelCommandMsgCallback(dynamixel_workbench_msgs::DynamixelCommand::Request& req,
                                    dynamixel_workbench_msgs::DynamixelCommand::Response& res);

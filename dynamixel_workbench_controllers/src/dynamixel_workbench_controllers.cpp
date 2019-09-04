@@ -33,6 +33,8 @@ DynamixelController::DynamixelController()
   use_moveit_ = priv_node_handle_.param<bool>("use_moveit", false);
 
   endstop_topic_ = priv_node_handle_.param<std::string>("endstop_topic", "");
+  emergency_stop_topic_ = priv_node_handle_.param<std::string>("emergency_stop_topic", "robotnik_base_hw/"
+                                                                                       "emergency_stop");
   num_upper_input_ = priv_node_handle_.param<int>("num_upper_input", 0);
   num_lower_input_ = priv_node_handle_.param<int>("num_lower_input", 1);
 
@@ -70,10 +72,10 @@ bool DynamixelController::initWorkbench(const std::string port_name, const uint3
   return result;
 }
 
-bool DynamixelController::getDynamixelsInfo(const std::string yaml_file)
+bool DynamixelController::getDynamixelsInfo(void)
 {
   YAML::Node dynamixel;
-  dynamixel = YAML::LoadFile(yaml_file.c_str());
+  dynamixel = YAML::LoadFile(yaml_file_.c_str());
 
   if (dynamixel == NULL)
     return false;
@@ -380,6 +382,7 @@ bool DynamixelController::getPresentPosition(std::vector<std::string> dxl_name)
 
 void DynamixelController::initPublisher()
 {
+  trajectory_pub_ = priv_node_handle_.advertise<trajectory_msgs::JointTrajectory>("joint_trajectory", 100);
   dynamixel_state_list_pub_ =
       priv_node_handle_.advertise<dynamixel_workbench_msgs::DynamixelStateList>("dynamixel_state", 100);
   if (is_joint_state_topic_)
@@ -396,6 +399,9 @@ void DynamixelController::initSubscriber()
     cmd_vel_sub_ = priv_node_handle_.subscribe("cmd_vel", 10, &DynamixelController::commandVelocityCallback, this);
   if (endstop_topic_ != "")
     endstop_sub_ = node_handle_.subscribe(endstop_topic_, 10, &DynamixelController::endstopCallback, this);
+  emergency_stop_sub_ =
+      node_handle_.subscribe(emergency_stop_topic_, 10, &DynamixelController::emergencyStopCallback, this);
+  first_start_ = true;
 }
 
 void DynamixelController::initServer()
@@ -518,7 +524,7 @@ void DynamixelController::publishCallback(const ros::TimerEvent&)
 
   ros::Time current_time = ros::Time::now();
   double diff = (current_time - last_endstop_time_).toSec();
-  if (diff > 0.1)
+  if (diff > 0.25)
   {
     for (auto const& dxl : dynamixel_)
     {
@@ -784,6 +790,32 @@ void DynamixelController::endstopCallback(const robotnik_msgs::inputs_outputs::C
   }
 }
 
+void DynamixelController::emergencyStopCallback(const std_msgs::Bool::ConstPtr& msg)
+{
+  if (!msg->data && first_start_)  // If not emergency stop and first start, init dynamixels
+  {
+    if (getDynamixelsInfo() == false)
+    {
+      ROS_ERROR("Please check YAML file");
+      ros::shutdown();
+    }
+    initDynamixels();
+
+    // Homing
+    trajectory_msgs::JointTrajectory msg;
+    msg.joint_names.push_back("torso_slider_joint");
+    msg.points.resize(1);
+    msg.points[0].positions.push_back(0.0);
+    trajectory_pub_.publish(msg);
+
+    first_start_ = false;
+  }
+  else if (msg->data)  // If emergency stop pressed, first start = true
+  {
+    first_start_ = true;
+  }
+}
+
 void DynamixelController::writeCallback(const ros::TimerEvent&)
 {
 #ifdef DEBUG
@@ -1031,7 +1063,7 @@ int main(int argc, char** argv)
 
   bool result = false;
 
-  std::string yaml_file = node_handle.param<std::string>("dynamixel_info", "");
+  dynamixel_controller.yaml_file_ = node_handle.param<std::string>("dynamixel_info", "");
 
   result = dynamixel_controller.initWorkbench(port_name, baud_rate);
   if (result == false)
@@ -1040,7 +1072,7 @@ int main(int argc, char** argv)
     return 0;
   }
 
-  result = dynamixel_controller.getDynamixelsInfo(yaml_file);
+  result = dynamixel_controller.getDynamixelsInfo();
   if (result == false)
   {
     ROS_ERROR("Please check YAML file");
