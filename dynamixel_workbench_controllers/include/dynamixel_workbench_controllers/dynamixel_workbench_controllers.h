@@ -72,6 +72,7 @@ private:
   ros::Subscriber trajectory_sub_;
 
   bool first_start_;
+  bool restarted_;
 
   // ROS Service Server
   ros::ServiceServer dynamixel_command_server_;
@@ -131,6 +132,7 @@ public:
   bool initControlItems(void);
   bool initSDKHandlers(void);
   bool getPresentPosition(std::vector<std::string> dxl_name);
+  bool setHome(void);
 
   double getReadPeriod()
   {

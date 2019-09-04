@@ -380,6 +380,16 @@ bool DynamixelController::getPresentPosition(std::vector<std::string> dxl_name)
   return result;
 }
 
+bool DynamixelController::setHome(void)
+{
+  // Homing
+  trajectory_msgs::JointTrajectory msg;
+  msg.joint_names.push_back("torso_slider_joint");
+  msg.points.resize(1);
+  msg.points[0].positions.push_back(0.0);
+  trajectory_pub_.publish(msg);
+}
+
 void DynamixelController::initPublisher()
 {
   trajectory_pub_ = priv_node_handle_.advertise<trajectory_msgs::JointTrajectory>("joint_trajectory", 100);
@@ -402,6 +412,7 @@ void DynamixelController::initSubscriber()
   emergency_stop_sub_ =
       node_handle_.subscribe(emergency_stop_topic_, 10, &DynamixelController::emergencyStopCallback, this);
   first_start_ = true;
+  restarted_ = false;
 }
 
 void DynamixelController::initServer()
@@ -792,7 +803,7 @@ void DynamixelController::endstopCallback(const robotnik_msgs::inputs_outputs::C
 
 void DynamixelController::emergencyStopCallback(const std_msgs::Bool::ConstPtr& msg)
 {
-  if (!msg->data && first_start_)  // If not emergency stop and first start, init dynamixels
+  if (!msg->data && restarted_)  // If not emergency stop and restarted, init dynamixels
   {
     if (getDynamixelsInfo() == false)
     {
@@ -801,19 +812,19 @@ void DynamixelController::emergencyStopCallback(const std_msgs::Bool::ConstPtr& 
     }
     initDynamixels();
 
-    // Homing
-    trajectory_msgs::JointTrajectory msg;
-    msg.joint_names.push_back("torso_slider_joint");
-    msg.points.resize(1);
-    msg.points[0].positions.push_back(0.0);
-    trajectory_pub_.publish(msg);
+    setHome();
 
-    first_start_ = false;
+    restarted_ = false;
   }
-  else if (msg->data)  // If emergency stop pressed, first start = true
+  else if (msg->data)  // If emergency stop pressed, restarted = true
   {
-    first_start_ = true;
+    restarted_ = true;
   }
+  else if (first_start_)
+  {
+    setHome();
+  }
+  first_start_ = false;
 }
 
 void DynamixelController::writeCallback(const ros::TimerEvent&)
