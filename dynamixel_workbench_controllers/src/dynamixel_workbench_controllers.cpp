@@ -820,7 +820,7 @@ void DynamixelController::emergencyStopCallback(const std_msgs::Bool::ConstPtr& 
   {
     restarted_ = true;
   }
-  else if (first_start_)
+  else if (first_start_ && !set_min_)
   {
     setHome();
   }
