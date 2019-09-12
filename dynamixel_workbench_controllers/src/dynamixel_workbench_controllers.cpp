@@ -380,16 +380,6 @@ bool DynamixelController::getPresentPosition(std::vector<std::string> dxl_name)
   return result;
 }
 
-bool DynamixelController::setHome(void)
-{
-  // Homing
-  trajectory_msgs::JointTrajectory msg;
-  msg.joint_names.push_back("torso_slider_joint");
-  msg.points.resize(1);
-  msg.points[0].positions.push_back(0.0);
-  trajectory_pub_.publish(msg);
-}
-
 void DynamixelController::initPublisher()
 {
   trajectory_pub_ = priv_node_handle_.advertise<trajectory_msgs::JointTrajectory>("joint_trajectory", 100);
@@ -419,6 +409,7 @@ void DynamixelController::initServer()
 {
   dynamixel_command_server_ =
       priv_node_handle_.advertiseService("dynamixel_command", &DynamixelController::dynamixelCommandMsgCallback, this);
+  set_home_server_ = priv_node_handle_.advertiseService("set_home", &DynamixelController::setHomeCallback, this);
 }
 
 void DynamixelController::readCallback(const ros::TimerEvent&)
@@ -803,28 +794,10 @@ void DynamixelController::endstopCallback(const robotnik_msgs::inputs_outputs::C
 
 void DynamixelController::emergencyStopCallback(const std_msgs::Bool::ConstPtr& msg)
 {
-  if (!msg->data && restarted_)  // If not emergency stop and restarted, init dynamixels
-  {
-    if (getDynamixelsInfo() == false)
-    {
-      ROS_ERROR("Please check YAML file");
-      ros::shutdown();
-    }
-    initDynamixels();
-
-    setHome();
-
-    restarted_ = false;
-  }
-  else if (msg->data)  // If emergency stop pressed, restarted = true
+  if (msg->data)  // If emergency stop pressed, restarted = true
   {
     restarted_ = true;
   }
-  else if (first_start_ && !set_min_)
-  {
-    setHome();
-  }
-  first_start_ = false;
 }
 
 void DynamixelController::writeCallback(const ros::TimerEvent&)
@@ -919,114 +892,152 @@ void DynamixelController::writeCallback(const ros::TimerEvent&)
 
 void DynamixelController::trajectoryMsgCallback(const trajectory_msgs::JointTrajectory::ConstPtr& msg)
 {
-  uint8_t id_cnt = 0;
-  bool result = false;
-  WayPoint wp;
-
-  if (is_moving_ == false)
+  if (restarted_)
   {
-    jnt_tra_msg_->joint_names.clear();
-    jnt_tra_msg_->points.clear();
-    pre_goal_.clear();
-
-    result = getPresentPosition(msg->joint_names);
-    if (result == false)
-      ROS_ERROR("Failed to get Present Position");
-
-    for (auto const& joint : msg->joint_names)
-    {
-      ROS_INFO("'%s' is ready to move", joint.c_str());
-
-      jnt_tra_msg_->joint_names.push_back(joint);
-      id_cnt++;
-    }
-
-    if (id_cnt != 0)
-    {
-      uint8_t cnt = 0;
-      while (cnt < msg->points.size())
-      {
-        std::vector<WayPoint> goal;
-        for (std::vector<int>::size_type id_num = 0; id_num < msg->points[cnt].positions.size(); id_num++)
-        {
-          wp.position = msg->points[cnt].positions.at(id_num);
-
-          if (msg->points[cnt].velocities.size() != 0)
-            wp.velocity = msg->points[cnt].velocities.at(id_num);
-          else
-            wp.velocity = 0.0f;
-
-          if (msg->points[cnt].accelerations.size() != 0)
-            wp.acceleration = msg->points[cnt].accelerations.at(id_num);
-          else
-            wp.acceleration = 0.0f;
-
-          goal.push_back(wp);
-        }
-
-        if (use_moveit_ == true)
-        {
-          trajectory_msgs::JointTrajectoryPoint jnt_tra_point_msg;
-
-          for (uint8_t id_num = 0; id_num < id_cnt; id_num++)
-          {
-            jnt_tra_point_msg.positions.push_back(goal[id_num].position);
-            jnt_tra_point_msg.velocities.push_back(goal[id_num].velocity);
-            jnt_tra_point_msg.accelerations.push_back(goal[id_num].acceleration);
-          }
-
-          jnt_tra_msg_->points.push_back(jnt_tra_point_msg);
-
-          cnt++;
-        }
-        else
-        {
-          jnt_tra_->setJointNum((uint8_t)msg->points[cnt].positions.size());
-
-          double move_time = 0.0f;
-          if (cnt == 0)
-            move_time = msg->points[cnt].time_from_start.toSec();
-          else
-            move_time = msg->points[cnt].time_from_start.toSec() - msg->points[cnt - 1].time_from_start.toSec();
-
-          jnt_tra_->init(move_time, write_period_, pre_goal_, goal);
-
-          std::vector<WayPoint> way_point;
-          trajectory_msgs::JointTrajectoryPoint jnt_tra_point_msg;
-
-          for (double index = 0.0; index < move_time; index = index + write_period_)
-          {
-            way_point = jnt_tra_->getJointWayPoint(index);
-
-            for (uint8_t id_num = 0; id_num < id_cnt; id_num++)
-            {
-              jnt_tra_point_msg.positions.push_back(way_point[id_num].position);
-              jnt_tra_point_msg.velocities.push_back(way_point[id_num].velocity);
-              jnt_tra_point_msg.accelerations.push_back(way_point[id_num].acceleration);
-            }
-
-            jnt_tra_msg_->points.push_back(jnt_tra_point_msg);
-            jnt_tra_point_msg.positions.clear();
-            jnt_tra_point_msg.velocities.clear();
-            jnt_tra_point_msg.accelerations.clear();
-          }
-
-          pre_goal_ = goal;
-          cnt++;
-        }
-      }
-      ROS_INFO("Succeeded to get joint trajectory!");
-      is_moving_ = true;
-    }
-    else
-    {
-      ROS_WARN("Please check joint_name");
-    }
+    ROS_ERROR("DynamixelController::trajectoryMsgCallback: It is necessary to call set_home service before call the "
+              "joint_trajectory topic.");
   }
   else
   {
-    ROS_WARN("Dynamixel is moving");
+    uint8_t id_cnt = 0;
+    bool result = false;
+    WayPoint wp;
+
+    if (is_moving_ == false)
+    {
+      jnt_tra_msg_->joint_names.clear();
+      jnt_tra_msg_->points.clear();
+      pre_goal_.clear();
+
+      result = getPresentPosition(msg->joint_names);
+      if (result == false)
+        ROS_ERROR("DynamixelController::trajectoryMsgCallback: Failed to get Present Position");
+
+      for (auto const& joint : msg->joint_names)
+      {
+        ROS_INFO("'%s' is ready to move", joint.c_str());
+
+        jnt_tra_msg_->joint_names.push_back(joint);
+        id_cnt++;
+      }
+
+      if (id_cnt != 0)
+      {
+        uint8_t cnt = 0;
+        while (cnt < msg->points.size())
+        {
+          std::vector<WayPoint> goal;
+          for (std::vector<int>::size_type id_num = 0; id_num < msg->points[cnt].positions.size(); id_num++)
+          {
+            wp.position = msg->points[cnt].positions.at(id_num);
+
+            if (msg->points[cnt].velocities.size() != 0)
+              wp.velocity = msg->points[cnt].velocities.at(id_num);
+            else
+              wp.velocity = 0.0f;
+
+            if (msg->points[cnt].accelerations.size() != 0)
+              wp.acceleration = msg->points[cnt].accelerations.at(id_num);
+            else
+              wp.acceleration = 0.0f;
+
+            goal.push_back(wp);
+          }
+
+          if (use_moveit_ == true)
+          {
+            trajectory_msgs::JointTrajectoryPoint jnt_tra_point_msg;
+
+            for (uint8_t id_num = 0; id_num < id_cnt; id_num++)
+            {
+              jnt_tra_point_msg.positions.push_back(goal[id_num].position);
+              jnt_tra_point_msg.velocities.push_back(goal[id_num].velocity);
+              jnt_tra_point_msg.accelerations.push_back(goal[id_num].acceleration);
+            }
+
+            jnt_tra_msg_->points.push_back(jnt_tra_point_msg);
+
+            cnt++;
+          }
+          else
+          {
+            jnt_tra_->setJointNum((uint8_t)msg->points[cnt].positions.size());
+
+            double move_time = 0.0f;
+            if (cnt == 0)
+              move_time = msg->points[cnt].time_from_start.toSec();
+            else
+              move_time = msg->points[cnt].time_from_start.toSec() - msg->points[cnt - 1].time_from_start.toSec();
+
+            jnt_tra_->init(move_time, write_period_, pre_goal_, goal);
+
+            std::vector<WayPoint> way_point;
+            trajectory_msgs::JointTrajectoryPoint jnt_tra_point_msg;
+
+            for (double index = 0.0; index < move_time; index = index + write_period_)
+            {
+              way_point = jnt_tra_->getJointWayPoint(index);
+
+              for (uint8_t id_num = 0; id_num < id_cnt; id_num++)
+              {
+                jnt_tra_point_msg.positions.push_back(way_point[id_num].position);
+                jnt_tra_point_msg.velocities.push_back(way_point[id_num].velocity);
+                jnt_tra_point_msg.accelerations.push_back(way_point[id_num].acceleration);
+              }
+
+              jnt_tra_msg_->points.push_back(jnt_tra_point_msg);
+              jnt_tra_point_msg.positions.clear();
+              jnt_tra_point_msg.velocities.clear();
+              jnt_tra_point_msg.accelerations.clear();
+            }
+
+            pre_goal_ = goal;
+            cnt++;
+          }
+        }
+        ROS_INFO("DynamixelController::trajectoryMsgCallback: Succeeded to get joint trajectory!");
+        is_moving_ = true;
+      }
+      else
+      {
+        ROS_WARN("DynamixelController::trajectoryMsgCallback: Please check joint_name");
+      }
+    }
+    else
+    {
+      ROS_WARN("DynamixelController::trajectoryMsgCallback: Dynamixel is moving");
+    }
   }
+}
+
+bool DynamixelController::setHomeCallback(std_srvs::Empty::Request& req, std_srvs::Empty::Response& res)
+{
+  if (restarted_)  // If restarted, init dynamixels
+  {
+    if (getDynamixelsInfo() == false)
+    {
+      ROS_ERROR("Please check YAML file");
+      ros::shutdown();
+    }
+    initDynamixels();
+
+    // Homing
+    trajectory_msgs::JointTrajectory msg;
+    msg.joint_names.push_back("torso_slider_joint");
+    msg.joint_names.push_back("head_pan_joint");
+    msg.joint_names.push_back("head_tilt_joint");
+    msg.points.resize(3);
+    msg.points[0].positions.push_back(0.0);
+    msg.points[1].positions.push_back(0.0);
+    msg.points[2].positions.push_back(0.0);
+    trajectory_pub_.publish(msg);
+
+    restarted_ = false;
+    return true;
+    ROS_INFO("DynamixelController::setHomeCallback: Setting torso to init position.");
+  }
+  ROS_INFO("DynamixelController::setHomeCallback: The torso has been initialized previously.");
+  return false;
 }
 
 bool DynamixelController::dynamixelCommandMsgCallback(dynamixel_workbench_msgs::DynamixelCommand::Request& req,

@@ -33,6 +33,7 @@
 #include <dynamixel_workbench_toolbox/dynamixel_workbench.h>
 #include <dynamixel_workbench_msgs/DynamixelStateList.h>
 #include <dynamixel_workbench_msgs/DynamixelCommand.h>
+#include <std_srvs/Empty.h>
 
 #include <dynamixel_workbench_controllers/trajectory_generator.h>
 
@@ -76,6 +77,7 @@ private:
 
   // ROS Service Server
   ros::ServiceServer dynamixel_command_server_;
+  ros::ServiceServer set_home_server_;
 
   // ROS Service Client
 
@@ -132,7 +134,6 @@ public:
   bool initControlItems(void);
   bool initSDKHandlers(void);
   bool getPresentPosition(std::vector<std::string> dxl_name);
-  bool setHome(void);
 
   double getReadPeriod()
   {
@@ -162,6 +163,7 @@ public:
   void trajectoryMsgCallback(const trajectory_msgs::JointTrajectory::ConstPtr& msg);
   bool dynamixelCommandMsgCallback(dynamixel_workbench_msgs::DynamixelCommand::Request& req,
                                    dynamixel_workbench_msgs::DynamixelCommand::Response& res);
+  bool setHomeCallback(std_srvs::Empty::Request& req, std_srvs::Empty::Response& res);
 };
 
 #endif  // DYNAMIXEL_WORKBENCH_CONTROLLERS_H
