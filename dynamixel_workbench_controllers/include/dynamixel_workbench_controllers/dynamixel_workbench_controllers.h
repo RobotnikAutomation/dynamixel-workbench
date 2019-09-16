@@ -72,7 +72,6 @@ private:
   ros::Subscriber emergency_stop_sub_;
   ros::Subscriber trajectory_sub_;
 
-  bool first_start_;
   bool restarted_;
 
   // ROS Service Server

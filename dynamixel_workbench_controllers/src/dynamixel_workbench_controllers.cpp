@@ -401,8 +401,7 @@ void DynamixelController::initSubscriber()
     endstop_sub_ = node_handle_.subscribe(endstop_topic_, 10, &DynamixelController::endstopCallback, this);
   emergency_stop_sub_ =
       node_handle_.subscribe(emergency_stop_topic_, 10, &DynamixelController::emergencyStopCallback, this);
-  first_start_ = true;
-  restarted_ = false;
+  restarted_ = true;
 }
 
 void DynamixelController::initServer()
