@@ -154,8 +154,10 @@ bool DynamixelController::loadDynamixels(void)
   return result;
 }
 
-bool DynamixelController::initDynamixels(void)
+bool DynamixelController::initDynamixels(bool init_slow)
 {
+  dynamixel_slow_ = init_slow;
+
   const char* log;
 
   for (auto const& dxl : dynamixel_)
@@ -168,7 +170,15 @@ bool DynamixelController::initDynamixels(void)
       {
         if (info.second.item_name != "ID" && info.second.item_name != "Baud_Rate")
         {
-          bool result = dxl_wb_->itemWrite((uint8_t)dxl.second, info.second.item_name.c_str(), info.second.value, &log);
+          bool result;
+          if (dynamixel_slow_ && info.second.item_name == "Profile_Velocity")
+          {
+            result = dxl_wb_->itemWrite((uint8_t)dxl.second, info.second.item_name.c_str(), 250, &log);
+          }
+          else
+          {
+            result = dxl_wb_->itemWrite((uint8_t)dxl.second, info.second.item_name.c_str(), info.second.value, &log);
+          }
           if (result == false)
           {
             ROS_ERROR("%s", log);
@@ -898,6 +908,11 @@ void DynamixelController::trajectoryMsgCallback(const trajectory_msgs::JointTraj
   }
   else
   {
+    if (dynamixel_slow_ && msg->header.frame_id != "slow")
+    {
+      initDynamixels(false);
+    }
+
     uint8_t id_cnt = 0;
     bool result = false;
     WayPoint wp;
@@ -1018,7 +1033,7 @@ bool DynamixelController::setHomeCallback(std_srvs::Empty::Request& req, std_srv
       ROS_ERROR("Please check YAML file");
       ros::shutdown();
     }
-    initDynamixels();
+    initDynamixels(true);
 
     // Homing
     trajectory_msgs::JointTrajectory msg;
@@ -1029,6 +1044,7 @@ bool DynamixelController::setHomeCallback(std_srvs::Empty::Request& req, std_srv
     msg.points[0].positions.push_back(0.0);
     msg.points[1].positions.push_back(0.0);
     msg.points[2].positions.push_back(0.0);
+    msg.header.frame_id = "slow";
     trajectory_pub_.publish(msg);
 
     restarted_ = false;
@@ -1107,7 +1123,7 @@ int main(int argc, char** argv)
     return 0;
   }
 
-  result = dynamixel_controller.initDynamixels();
+  result = dynamixel_controller.initDynamixels(false);
   if (result == false)
   {
     ROS_ERROR("Please check control table (http://emanual.robotis.com/#control-table)");

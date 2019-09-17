@@ -115,6 +115,7 @@ private:
   double pub_period_;
 
   bool is_moving_;
+  bool dynamixel_slow_;
 
   bool set_min_;
   bool set_max_;
@@ -129,7 +130,7 @@ public:
   bool initWorkbench(const std::string port_name, const uint32_t baud_rate);
   bool getDynamixelsInfo(void);
   bool loadDynamixels(void);
-  bool initDynamixels(void);
+  bool initDynamixels(bool init_slow);
   bool initControlItems(void);
   bool initSDKHandlers(void);
   bool getPresentPosition(std::vector<std::string> dxl_name);
