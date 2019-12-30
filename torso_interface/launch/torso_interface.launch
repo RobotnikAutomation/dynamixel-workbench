@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<launch>
+    <arg name="debug" default="false"/>
+    <arg if="$(arg debug)" name="launch_prefix" default="gdb -ex run --args"/>
+    <arg unless="$(arg debug)" name="launch_prefix" default=""/>
+
+    <arg name="torso_interface_config" default="$(find torso_interface)/config/torso_interface.yaml"/>
+    <rosparam file="$(arg torso_interface_config)" command="load"/>
+
+    <node name="torso_interface" pkg="torso_interface" type="torso_interface_node" output="screen" respawn="true" launch-prefix="$(arg launch_prefix)">
+
+    </node>
+
+</launch>
