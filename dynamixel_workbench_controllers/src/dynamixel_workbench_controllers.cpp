@@ -1041,7 +1041,10 @@ bool DynamixelController::setHomeCallback(std_srvs::Empty::Request& req, std_srv
     msg.joint_names.push_back("head_pan_joint");
     msg.joint_names.push_back("head_tilt_joint");
     msg.points.resize(3);
-    msg.points[0].positions.push_back(0.0);
+    if (set_min_)
+      msg.points[0].positions.push_back(0.1);
+    else
+      msg.points[0].positions.push_back(0.0);
     msg.points[1].positions.push_back(0.0);
     msg.points[2].positions.push_back(0.0);
     msg.header.frame_id = "slow";
